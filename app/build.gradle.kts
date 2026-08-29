@@ -40,13 +40,17 @@ android {
 
     signingConfigs {
         create("release") {
-            // امضا با کلید دیباگ اگر کلید release تعریف نشده باشد (برای استفاده شخصی کافی است)
-            val ksPath = System.getenv("AURORA_KEYSTORE") ?: ""
-            if (ksPath.isNotEmpty() && file(ksPath).exists()) {
+            val ksPath = System.getenv("AURORA_KEYSTORE")
+            val ksPass = System.getenv("AURORA_KS_PASS")
+            val ksAlias = System.getenv("AURORA_KEY_ALIAS")
+            val ksKeyPass = System.getenv("AURORA_KEY_PASS")
+            if (!ksPath.isNullOrEmpty() && file(ksPath).exists() &&
+                !ksPass.isNullOrEmpty() && !ksAlias.isNullOrEmpty() && !ksKeyPass.isNullOrEmpty()
+            ) {
                 storeFile = file(ksPath)
-                storePassword = System.getenv("AURORA_KS_PASS")
-                keyAlias = System.getenv("AURORA_KEY_ALIAS")
-                keyPassword = System.getenv("AURORA_KEY_PASS")
+                storePassword = ksPass
+                keyAlias = ksAlias
+                keyPassword = ksKeyPass
             }
         }
     }
@@ -59,9 +63,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // اگر کلید release موجود بود امضا کن، وگرنه گریدل خودش با دیباگ امضا می‌کند
-            val ksPath = System.getenv("AURORA_KEYSTORE") ?: ""
-            if (ksPath.isNotEmpty() && file(ksPath).exists()) {
+            // اگر کلید release در دسترس باشد امضا کن؛ وگرنه گریدل با کلید دیباگ امضا می‌کند
+            val ksPath = System.getenv("AURORA_KEYSTORE")
+            val ksPass = System.getenv("AURORA_KS_PASS")
+            val ksAlias = System.getenv("AURORA_KEY_ALIAS")
+            val ksKeyPass = System.getenv("AURORA_KEY_PASS")
+            if (!ksPath.isNullOrEmpty() && file(ksPath).exists() &&
+                !ksPass.isNullOrEmpty() && !ksAlias.isNullOrEmpty() && !ksKeyPass.isNullOrEmpty()
+            ) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

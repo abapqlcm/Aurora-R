@@ -169,6 +169,30 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: Generate signing keystore
+        run: |
+          # کلید امضای پایدار برای استفاده شخصی (Aurora-R).
+          # اگر سیکرت‌های AURORA_* در ریپو تعریف شده باشند از آن‌ها استفاده می‌شود،
+          # وگرنه یک کلید ثابت با گذرواژه‌ی مشخص ساخته می‌شود تا APK قابل نصب باشد.
+          KS_PASS="${{ secrets.AURORA_KS_PASS }}"
+          if [ -z "$KS_PASS" ]; then KS_PASS="aurora-r-personal"; fi
+          KEY_ALIAS="${{ secrets.AURORA_KEY_ALIAS }}"
+          if [ -z "$KEY_ALIAS" ]; then KEY_ALIAS="aurora"; fi
+          KEY_PASS="${{ secrets.AURORA_KEY_PASS }}"
+          if [ -z "$KEY_PASS" ]; then KEY_PASS="$KS_PASS"; fi
+
+          keytool -genkeypair -v \
+            -keystore "$RUNNER_TEMP/aurora.jks" \
+            -alias "$KEY_ALIAS" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+            -dname "CN=Aurora-R, OU=iprez, O=Aurora, C=IR"
+
+          echo "AURORA_KEYSTORE=$RUNNER_TEMP/aurora.jks" >> "$GITHUB_ENV"
+          echo "AURORA_KS_PASS=$KS_PASS" >> "$GITHUB_ENV"
+          echo "AURORA_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "AURORA_KEY_PASS=$KEY_PASS" >> "$GITHUB_ENV"
+
       - name: Download native libraries
         uses: actions/download-artifact@v4
         with:
@@ -198,6 +222,16 @@ jobs:
       - name: Build release APK
         run: |
           gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK is signed
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          echo "APK: $APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          "$BT/apksigner" verify --verbose "$APK"
+          echo "امضا تأیید شد ✅"
 
       - name: Rename APK
         run: |
