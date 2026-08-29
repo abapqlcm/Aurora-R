@@ -134,14 +134,34 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
+          # hev-socks5-tunnel یک JNI_OnLoad داخلی دارد که کلاس جاوای خودش
+          # ("hev/htproxy/TProxyService") را FindClass می‌کند و اگر پیدا نکند
+          # JNI_ERR برمی‌گرداند → System.loadLibrary در اپ ما فیل می‌شود.
+          # ما پل JNI خودمان را داریم و مستقیم hev_socks5_tunnel_main_from_str
+          # را صدا می‌زنیم، پس این فایل را کامل از بیلد حذف می‌کنیم.
+          echo "=== حذف JNI_OnLoad داخلی hev ==="
+          rm -f src/hev-jni.c src/hev-jni.h
+          grep -rn "hev-jni" src/ && { echo "خطا: ارجاع باقی‌مانده به hev-jni"; exit 1; } || echo "OK: هیچ ارجاعی نمانده"
+
           $ANDROID_NDK_HOME/ndk-build \
             NDK_PROJECT_PATH=. \
             APP_BUILD_SCRIPT=./Android.mk \
             APP_ABI="arm64-v8a armeabi-v7a" \
             APP_PLATFORM=android-24 \
             APP_OPTIM=release
+
           echo "--- خروجی ---"
           find libs -name "*.so" -exec ls -lh {} \;
+
+          echo "=== تأیید: نباید JNI_OnLoad داشته باشد ==="
+          NM="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          for so in $(find libs -name "libhev-socks5-tunnel.so"); do
+            if "$NM" -D --defined-only "$so" 2>/dev/null | grep -q "JNI_OnLoad"; then
+              echo "FAIL $so : JNI_OnLoad هنوز وجود دارد → loadLibrary روی گوشی فیل می‌شود"
+              exit 1
+            fi
+            echo "OK   $so : بدون JNI_OnLoad"
+          done
 
       - name: Upload tun2socks libs
         uses: actions/upload-artifact@v4
