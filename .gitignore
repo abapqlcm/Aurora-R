@@ -1,0 +1,17 @@
+# فایل‌های قابل نادیده‌گرفتن
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+
+# کتابخانه‌های بومی ساخته‌شده (توسط CI تولید می‌شوند)
+/app/src/main/jniLibs/
+
+# محیط محلی
+env.*
+*.local
