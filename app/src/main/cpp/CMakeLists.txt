@@ -10,10 +10,16 @@ set(AETHER_LIB ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libaether.so)
 set(HEV_LIB    ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libhev-socks5-tunnel.so)
 
 add_library(aether SHARED IMPORTED)
-set_target_properties(aether PROPERTIES IMPORTED_LOCATION ${AETHER_LIB})
+set_target_properties(aether PROPERTIES
+        IMPORTED_LOCATION ${AETHER_LIB}
+        # cargo-ndk بدون soname می‌سازد؛ اگر ست نشود CMake مسیر مطلق رانر را در
+        # DT_NEEDED می‌نویسد و روی گوشی لینکر کرش می‌کند. اینجا soname را دستی مشخص می‌کنیم.
+        IMPORTED_SONAME "libaether.so")
 
 add_library(hev_socks5_tunnel SHARED IMPORTED)
-set_target_properties(hev_socks5_tunnel PROPERTIES IMPORTED_LOCATION ${HEV_LIB})
+set_target_properties(hev_socks5_tunnel PROPERTIES
+        IMPORTED_LOCATION ${HEV_LIB}
+        IMPORTED_SONAME "libhev-socks5-tunnel.so")
 
 # پل JNI ما
 add_library(aurora_jni SHARED
