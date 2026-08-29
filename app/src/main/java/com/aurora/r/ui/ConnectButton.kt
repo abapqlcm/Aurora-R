@@ -124,11 +124,11 @@ fun ConnectButton(
             )
             Text(
                 text = when (state) {
-                    VpnState.CONNECTED -> "متصل"
-                    VpnState.CONNECTING -> "در حال اتصال"
-                    VpnState.STOPPING -> "در حال قطع"
-                    VpnState.ERROR -> "خطا"
-                    else -> "قطع"
+                    VpnState.CONNECTED -> "CONNECTED"
+                    VpnState.CONNECTING -> "CONNECTING"
+                    VpnState.STOPPING -> "STOPPING"
+                    VpnState.ERROR -> "ERROR"
+                    else -> "DISCONNECTED"
                 },
                 color = ringColor,
                 modifier = Modifier.padding(top = 8.dp)

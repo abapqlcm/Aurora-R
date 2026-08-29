@@ -65,7 +65,7 @@ class AuroraVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopVpn("توقف توسط کاربر")
+                stopVpn("Stopped by user")
                 return START_NOT_STICKY
             }
             ACTION_START -> {
@@ -82,8 +82,8 @@ class AuroraVpnService : VpnService() {
     }
 
     private fun startVpn() {
-        startForeground(1, buildNotification("در حال اتصال…"))
-        broadcast(VpnState.CONNECTING, "در حال آماده‌سازی هسته Aurora…")
+        startForeground(1, buildNotification("Connecting…"))
+        broadcast(VpnState.CONNECTING, "Preparing Aurora core…")
 
         scope.launch {
             try {
@@ -102,20 +102,20 @@ class AuroraVpnService : VpnService() {
                 }
                 val openReply = AetherCore.identityOpen(openPayload)
                 if (!openReply.optBoolean("ok", false)) {
-                    fail("باز کردن هویت شکست خورد: ${openReply.optString("error")}")
+                    fail("Identity open failed: ${openReply.optString("error")}")
                     return@launch
                 }
                 // پاسخ: {"ok":true,"job":<id>} — job را مستقیماً از سطح بالا می‌خوانیم
                 val openJob = openReply.optLong("job", 0L)
                 if (openJob == 0L) {
-                    fail("پاسخ باز کردن هویت job نداشت")
+                    fail("identity_open returned no job")
                     return@launch
                 }
                 val openResult = AetherCore.awaitJob(openJob)
                 // نتیجه: {"identity":<id>,"summary":{...},"path":"...","lastconn_path":"..."}
                 val identityId = openResult.optLong("identity", 0L)
                 if (identityId == 0L) {
-                    fail("هویت ساخته نشد")
+                    fail("Identity was not created")
                     return@launch
                 }
 
@@ -123,45 +123,47 @@ class AuroraVpnService : VpnService() {
                 val endpoint = if (config.useManualEndpoint && config.manualEndpoint.isNotBlank()) {
                     config.manualEndpoint
                 } else {
-                    broadcast(VpnState.CONNECTING, "در حال اسکن endpointها…")
+                    broadcast(VpnState.CONNECTING, "Scanning endpoints…")
                     val scanPayload = JSONObject().apply {
                         put("transport", config.protocol)
                         put("mode", config.scanMode)
+                        put("ip", config.ipFamily)
                         put("profile", config.noizeProfile)
                     }
                     val scanReply = AetherCore.scanStart(identityId, scanPayload)
                     if (!scanReply.optBoolean("ok", false)) {
-                        fail("اسکن شکست خورد: ${scanReply.optString("error")}")
+                        fail("Scan failed: ${scanReply.optString("error")}")
                         return@launch
                     }
                     // پاسخ: {"ok":true,"job":<id>}
                     val scanJob = scanReply.optLong("job", 0L)
                     if (scanJob == 0L) {
-                        fail("پاسخ اسکن job نداشت")
+                        fail("scan_start returned no job")
                         return@launch
                     }
                     val scanResult = AetherCore.awaitJob(scanJob)
                     // نتیجه: {"endpoint":"IP:PORT"}
                     val ep = scanResult.optString("endpoint").takeIf { it.isNotBlank() }
                     if (ep == null) {
-                        fail("هیچ endpoint سالمی پیدا نشد")
+                        fail("No healthy endpoint found")
                         return@launch
                     }
                     ep
                 }
 
                 // 4) راه‌اندازی تانل Aether روی SOCKS5 محلی
-                broadcast(VpnState.CONNECTING, "در حال برقراری تانل به $endpoint")
+                broadcast(VpnState.CONNECTING, "Establishing tunnel to $endpoint")
                 val tunnelPayload = JSONObject().apply {
                     put("peer", endpoint)
                     put("transport", config.protocol)
                     put("socks", "127.0.0.1:${config.socksPort}")
                     put("profile", config.noizeProfile)
-                    put("keepalive", 25)
+                    put("keepalive", config.keepaliveSec)
+                    put("ech", config.enableEch)
                 }
                 val tunnelReply = AetherCore.tunnelStart(identityId, tunnelPayload)
                 if (!tunnelReply.optBoolean("ok", false)) {
-                    fail("تانل شکست خورد: ${tunnelReply.optString("error")}")
+                    fail("Tunnel failed: ${tunnelReply.optString("error")}")
                     return@launch
                 }
                 // job را برای لغو در زمان قطع نگه می‌داریم
@@ -170,7 +172,7 @@ class AuroraVpnService : VpnService() {
                 // 5) ساخت اینترفیس TUN (بدون خودِ اپ برای جلوگیری از loop)
                 val fd = establishTun() ?: run {
                     AetherCore.jobCancel(tunnelJobId)
-                    fail("ساخت اینترفیس TUN شکست خورد")
+                    fail("Failed to establish TUN interface")
                     return@launch
                 }
                 tunFd = fd
@@ -186,10 +188,10 @@ class AuroraVpnService : VpnService() {
                 }, "aurora-tun").also { it.start() }
 
                 // 7) وضعیت متصل + شروع برودکست آمار
-                broadcast(VpnState.CONNECTED, "متصل به $endpoint")
+                broadcast(VpnState.CONNECTED, "Connected to $endpoint")
                 startStats()
             } catch (e: Exception) {
-                fail("خطا: ${e.message}")
+                fail("Error: ${e.message}")
             }
         }
     }
@@ -239,7 +241,7 @@ class AuroraVpnService : VpnService() {
                     putExtra(EXTRA_RX, s[3])
                 }
                 sendBroadcast(intent)
-                updateNotification("متصل • ↑${(s[1] / 1024)}KB ↓${(s[3] / 1024)}KB")
+                updateNotification("Connected • ↑${(s[1] / 1024)}KB ↓${(s[3] / 1024)}KB")
             }
         }
     }
@@ -297,9 +299,9 @@ class AuroraVpnService : VpnService() {
         updateNotification(
             when (state) {
                 VpnState.CONNECTED -> msg
-                VpnState.CONNECTING -> "در حال اتصال…"
-                VpnState.ERROR -> "خطا: $msg"
-                else -> "قطع شد"
+                VpnState.CONNECTING -> "Connecting…"
+                VpnState.ERROR -> "Error: $msg"
+                else -> "Disconnected"
             }
         )
     }
@@ -309,7 +311,7 @@ class AuroraVpnService : VpnService() {
             val ch = NotificationChannel(
                 CHANNEL_ID, "Aurora-R VPN", NotificationManager.IMPORTANCE_LOW
             )
-            ch.setDescription("وضعیت تانل Aurora-R")
+            ch.setDescription("Aurora-R tunnel status")
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }

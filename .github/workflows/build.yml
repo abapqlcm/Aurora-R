@@ -76,6 +76,10 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
         run: |
+          # SONAME را همان موقع لینک با RUSTFLAGS ست می‌کنیم.
+          # (استفاده از patchelf بعد از بیلد سکشن DT_GNU_HASH را خراب می‌کرد و
+          #  روی دستگاه خطای «empty/missing DT_HASH/DT_GNU_HASH» می‌داد.)
+          export RUSTFLAGS="-C link-arg=-Wl,-soname,libaether.so"
           cargo ndk -t ${{ matrix.abi }} --platform 24 build --release --lib
           echo "--- خروجی ---"
           find target -name "libaether.so" -exec ls -lh {} \;
@@ -218,31 +222,13 @@ jobs:
           echo "=== نتیجه ==="
           ls -lhR app/src/main/jniLibs/
 
-      - name: Set SONAME on native libs (critical)
-        run: |
-          set -e
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq patchelf
-
-          # cargo-ndk کتابخانه را بدون SONAME می‌سازد. اگر SONAME نباشد، لینکر
-          # هنگام ساخت پل JNI مسیر کامل فایل روی رانر را در DT_NEEDED می‌نویسد و
-          # اپ روی گوشی هنگام System.loadLibrary کرش می‌کند.
-          for abi in arm64-v8a armeabi-v7a; do
-            for lib in libaether.so libhev-socks5-tunnel.so; do
-              F="app/src/main/jniLibs/$abi/$lib"
-              patchelf --set-soname "$lib" "$F"
-              echo "  $abi/$lib → soname: $(patchelf --print-soname "$F")"
-            done
-          done
-
       - name: Build release APK
         run: |
           gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Verify no absolute paths in DT_NEEDED (critical)
+      - name: Verify SONAME + no absolute paths + valid hash sections (critical)
         run: |
           set -e
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
           rm -rf /tmp/apkcheck && mkdir -p /tmp/apkcheck
           unzip -q "$APK" "lib/*" -d /tmp/apkcheck
@@ -251,18 +237,40 @@ jobs:
 
           FAIL=0
           for so in $(find /tmp/apkcheck/lib -name "*.so"); do
-            NEEDS=$("$READELF" -d "$so" 2>/dev/null | grep -i "NEEDED" || true)
-            if echo "$NEEDS" | grep -q "/"; then
-              echo "❌ $so حاوی مسیر مطلق در DT_NEEDED است:"
-              echo "$NEEDS" | grep "/"
+            D=$("$READELF" -d "$so" 2>/dev/null || true)
+
+            # ۱) هیچ DT_NEEDED نباید مسیر مطلق باشد
+            if echo "$D" | grep -i NEEDED | grep -q "/"; then
+              echo "FAIL $so : absolute path in DT_NEEDED"
+              echo "$D" | grep -i NEEDED | grep "/"
+              FAIL=1
+            fi
+
+            # ۲) سکشن hash باید سالم باشد (dlopen بدون آن خطا می‌دهد)
+            if ! echo "$D" | grep -qiE "\(HASH\)|GNU_HASH"; then
+              echo "FAIL $so : missing DT_HASH/DT_GNU_HASH"
               FAIL=1
             fi
           done
+
+          # ۳) کتابخانه‌های خودمان باید SONAME داشته باشند
+          for abi in arm64-v8a armeabi-v7a; do
+            for lib in libaether.so libhev-socks5-tunnel.so; do
+              SO=$("$READELF" -d "/tmp/apkcheck/lib/$abi/$lib" 2>/dev/null | grep -i soname || true)
+              if [ -z "$SO" ]; then
+                echo "FAIL $abi/$lib : no SONAME"
+                FAIL=1
+              else
+                echo "OK   $abi/$lib -> $(echo "$SO" | sed 's/.*\[\(.*\)\]/\1/')"
+              fi
+            done
+          done
+
           if [ "$FAIL" = "1" ]; then
-            echo "بیلد رد شد: DT_NEEDED باید فقط نام کوتاه داشته باشد."
+            echo "Build rejected: native libraries would fail dlopen on device."
             exit 1
           fi
-          echo "✅ همه کتابخانه‌ها فقط نام کوتاه دارند — اپ روی دستگاه لینک می‌شود."
+          echo "All native libraries verified: SONAME set, short names only, hash sections intact."
 
       - name: Verify APK is signed
         run: |

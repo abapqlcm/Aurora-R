@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.VpnService
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aurora.r.AuroraVpnService.Companion.ACTION_START
@@ -19,13 +19,12 @@ import com.aurora.r.AuroraVpnService.Companion.EXTRA_TX
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import org.json.JSONObject
 
-/** ViewModel مرکزی: مدیریت وضعیت اتصال، تنظیمات و endpointها */
+/** Central ViewModel: connection state, settings and endpoints. */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = SettingsRepository(application)
@@ -41,11 +40,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val version = if (AetherCore.available) AetherCore.version() else "—"
     val nativeError: String? = AetherCore.loadError
 
-    // وضعیت UI
+    // UI state
     val state = MutableStateFlow(VpnState.DISCONNECTED)
-    val statusMsg = MutableStateFlow("آماده")
+    val statusMsg = MutableStateFlow("Ready")
     val txBytes = MutableStateFlow(0L)
     val rxBytes = MutableStateFlow(0L)
+
+    // scan state
+    val scanState = MutableStateFlow(ScanState.IDLE)
+    val scanLog = mutableStateListOf<String>()
+    val scanResults = mutableStateListOf<ScanResult>()
 
     init {
         registerReceiver()
@@ -65,9 +69,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         val filter = IntentFilter(ACTION_STATE)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            getApplication<Application>().registerReceiver(
-                receiver, filter, Context.RECEIVER_NOT_EXPORTED
-            )
+            getApplication<Application>().registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             getApplication<Application>().registerReceiver(receiver, filter)
@@ -95,18 +97,84 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** درخواست مجوز VPN و سپس شروع سرویس */
+    /** Run a real endpoint scan against the core via JNI. */
+    fun runScan() {
+        if (!AetherCore.available) { statusMsg.value = nativeError ?: "native lib missing"; return }
+        viewModelScope.launch {
+            try {
+                scanState.value = ScanState.RUNNING
+                scanLog.clear()
+                scanResults.clear()
+                scanLog.add("Provisioning identity…")
+
+                val cfgDir = getApplication<Application>().filesDir
+                val idPath = java.io.File(cfgDir, "aether/aether.toml").absolutePath
+                val open = AetherCore.identityOpen(JSONObject().apply {
+                    put("path", idPath)
+                    put("transport", config.value.protocol)
+                })
+                if (!open.optBoolean("ok", false)) {
+                    scanLog.add("identity open failed: ${open.optString("error")}")
+                    scanState.value = ScanState.ERROR
+                    return@launch
+                }
+                val openJob = open.optLong("job", 0L)
+                if (openJob == 0L) { scanLog.add("identity open returned no job"); scanState.value = ScanState.ERROR; return@launch }
+                val openResult = AetherCore.awaitJob(openJob)
+                val identityId = openResult.optLong("identity", 0L)
+                if (identityId == 0L) { scanLog.add("identity not created"); scanState.value = ScanState.ERROR; return@launch }
+
+                scanLog.add("Scanning (${ScanMode.from(config.value.scanMode).label}, ${config.value.ipFamily})…")
+                val scan = AetherCore.scanStart(identityId, JSONObject().apply {
+                    put("transport", config.value.protocol)
+                    put("mode", config.value.scanMode)
+                    put("ip", config.value.ipFamily)
+                    put("profile", config.value.noizeProfile)
+                })
+                if (!scan.optBoolean("ok", false)) {
+                    scanLog.add("scan failed: ${scan.optString("error")}")
+                    scanState.value = ScanState.ERROR
+                    return@launch
+                }
+                val scanJob = scan.optLong("job", 0L)
+                if (scanJob == 0L) { scanLog.add("scan returned no job"); scanState.value = ScanState.ERROR; return@launch }
+                val result = AetherCore.awaitJob(scanJob)
+                val endpoint = result.optString("endpoint").takeIf { it.isNotBlank() }
+                if (endpoint != null) {
+                    scanLog.add("Found endpoint: $endpoint")
+                    scanResults.add(ScanResult(endpoint, config.value.protocol, reachable = true))
+                    // save as a manual endpoint automatically
+                    val name = "scan-${scanResults.size}"
+                    addEndpoint(SavedEndpoint(name, endpoint, config.value.protocol))
+                    updateConfig { it.copy(useManualEndpoint = true, manualEndpoint = endpoint) }
+                    scanState.value = ScanState.DONE
+                } else {
+                    scanLog.add("No healthy endpoint found")
+                    scanState.value = ScanState.DONE
+                }
+            } catch (e: Throwable) {
+                scanLog.add("error: ${e.message}")
+                scanState.value = ScanState.ERROR
+            }
+        }
+    }
+
+    fun clearScan() {
+        scanResults.clear()
+        scanLog.clear()
+        scanState.value = ScanState.IDLE
+    }
+
+    /** Request VPN permission, then start the service. */
     fun connect(): Intent? {
         if (!AetherCore.available) {
             state.value = VpnState.ERROR
-            statusMsg.value = "کتابخانه بومی بارگذاری نشد: ${AetherCore.loadError}"
+            statusMsg.value = nativeError ?: "native library failed to load"
             return null
         }
         if (state.value == VpnState.CONNECTED || state.value == VpnState.CONNECTING) return null
         val prepare = VpnService.prepare(getApplication())
-        if (prepare != null) {
-            return prepare  // MainActivity باید با startActivityForResult صدا بزند
-        }
+        if (prepare != null) return prepare
         startService()
         return null
     }
@@ -125,9 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun disconnect() {
-        val intent = Intent(getApplication(), AuroraVpnService::class.java).apply {
-            action = ACTION_STOP
-        }
+        val intent = Intent(getApplication(), AuroraVpnService::class.java).apply { action = ACTION_STOP }
         getApplication<Application>().startService(intent)
     }
 

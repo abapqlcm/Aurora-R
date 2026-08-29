@@ -12,18 +12,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aurora.r.*
 
-/** صفحه‌های اپ */
 enum class Screen(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    HOME("خانه", Icons.Filled.Shield),
-    ENDPOINTS("سرورها", Icons.Filled.Dns),
-    SETTINGS("تنظیمات", Icons.Filled.Settings),
-    ABOUT("درباره", Icons.Filled.Info)
+    HOME("Home", Icons.Filled.Shield),
+    SCAN("Scan", Icons.Filled.Radar),
+    SERVERS("Servers", Icons.Filled.Dns),
+    SETTINGS("Settings", Icons.Filled.Settings),
+    ABOUT("About", Icons.Filled.Info)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,6 +34,7 @@ fun AuroraApp(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit
 
     Scaffold(
         containerColor = AuroraBlack,
+        contentWindowInsets = WindowInsets.safeDrawing,   // fixes tabs hidden behind system bars
         topBar = { AuroraTopBar() },
         bottomBar = {
             NavigationBar(containerColor = AuroraSurface, tonalElevation = 0.dp) {
@@ -41,7 +43,7 @@ fun AuroraApp(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit
                         selected = screen == s,
                         onClick = { screen = s },
                         icon = { Icon(s.icon, contentDescription = s.title) },
-                        label = { Text(s.title, fontSize = 11.sp) },
+                        label = { Text(s.title, fontSize = 10.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = AuroraBlack,
                             selectedTextColor = AuroraGold,
@@ -62,7 +64,8 @@ fun AuroraApp(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit
         ) {
             when (screen) {
                 Screen.HOME -> HomeScreen(vm, onConnect, onDisconnect)
-                Screen.ENDPOINTS -> EndpointsScreen(vm)
+                Screen.SCAN -> ScanScreen(vm)
+                Screen.SERVERS -> ServersScreen(vm)
                 Screen.SETTINGS -> SettingsScreen(vm)
                 Screen.ABOUT -> AboutScreen(vm)
             }
@@ -70,14 +73,11 @@ fun AuroraApp(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuroraTopBar() {
     Surface(color = AuroraBlack) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -88,22 +88,12 @@ private fun AuroraTopBar() {
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 3.sp,
                     style = androidx.compose.ui.text.TextStyle(
-                        brush = Brush.horizontalGradient(
-                            listOf(AuroraGoldBright, AuroraGold, AuroraGoldDim)
-                        )
+                        brush = Brush.horizontalGradient(listOf(AuroraGoldBright, AuroraGold, AuroraGoldDim))
                     )
                 )
-                Text(
-                    "ساخته‌شده توسط @iprez",
-                    color = AuroraTextDim,
-                    fontSize = 11.sp
-                )
+                Text("by @iprez", color = AuroraTextDim, fontSize = 11.sp)
             }
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = AuroraSurface2,
-                modifier = Modifier.padding(start = 8.dp)
-            ) {
+            Surface(shape = RoundedCornerShape(50), color = AuroraSurface2) {
                 Text(
                     "@iprez",
                     color = AuroraGold,
@@ -116,7 +106,7 @@ private fun AuroraTopBar() {
     }
 }
 
-/* ------------------------------------------------------------- خانه ------ */
+/* ----------------------------------------------------------------- HOME -- */
 
 @Composable
 private fun HomeScreen(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit) {
@@ -127,74 +117,65 @@ private fun HomeScreen(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: (
     val cfg by vm.config.collectAsState()
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+
+        if (vm.nativeError != null) {
+            AuroraCard {
+                Text("Native library error", color = AuroraRed, fontWeight = FontWeight.Bold)
+                Text(vm.nativeError!!, color = AuroraTextMid, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(14.dp))
+        }
 
         ConnectButton(
             state = state,
             onClick = {
-                if (state == VpnState.CONNECTED || state == VpnState.CONNECTING) onDisconnect()
-                else onConnect()
+                if (state == VpnState.CONNECTED || state == VpnState.CONNECTING) onDisconnect() else onConnect()
             }
         )
 
-        Spacer(Modifier.height(12.dp))
-
+        Spacer(Modifier.height(10.dp))
         Text(
-            text = msg.ifBlank { "برای اتصال دکمه را بزنید" },
-            color = AuroraTextMid,
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 20.dp)
+            msg.ifBlank { "Tap to connect" },
+            color = AuroraTextMid, fontSize = 13.sp, textAlign = TextAlign.Center
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(22.dp))
 
-        // کارت آمار ترافیک
         AuroraCard {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                StatColumn("دانلود", formatBytes(rx), Icons.Filled.ArrowDownward)
-                Divider(
-                    modifier = Modifier.height(46.dp).width(1.dp),
-                    color = AuroraDivider
-                )
-                StatColumn("آپلود", formatBytes(tx), Icons.Filled.ArrowUpward)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                StatColumn("Download", formatBytes(rx), Icons.Filled.ArrowDownward)
+                Divider(Modifier.height(46.dp).width(1.dp), color = AuroraDivider)
+                StatColumn("Upload", formatBytes(tx), Icons.Filled.ArrowUpward)
             }
         }
 
         Spacer(Modifier.height(14.dp))
 
-        // کارت وضعیت فعلی
         AuroraCard {
-            SectionTitle("پیکربندی فعال")
-            InfoRow("پروتکل", Protocol.from(cfg.protocol).label)
+            SectionTitle("ACTIVE CONFIGURATION")
+            InfoRow("Protocol", Protocol.from(cfg.protocol).label)
             InfoRow(
-                "سرور",
-                if (cfg.useManualEndpoint && cfg.manualEndpoint.isNotBlank())
-                    cfg.manualEndpoint
-                else "اسکن خودکار (${ScanMode.from(cfg.scanMode).label})"
+                "Server",
+                if (cfg.useManualEndpoint && cfg.manualEndpoint.isNotBlank()) cfg.manualEndpoint
+                else "Auto scan (${ScanMode.from(cfg.scanMode).label})"
             )
-            InfoRow("مبهم‌سازی", NoizeProfile.from(cfg.noizeProfile).label)
-            InfoRow("حالت", "TUN — کل دستگاه")
-            InfoRow("هسته Aether", "v${vm.version}")
+            InfoRow("Obfuscation", NoizeProfile.from(cfg.noizeProfile).label)
+            InfoRow("Mode", "TUN — whole device")
+            InfoRow("Aether core", "v${vm.version}")
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 private fun StatColumn(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, contentDescription = null, tint = AuroraGold, modifier = Modifier.size(20.dp))
+        Icon(icon, null, tint = AuroraGold, modifier = Modifier.size(20.dp))
         Spacer(Modifier.height(6.dp))
         Text(value, color = AuroraTextHigh, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Text(label, color = AuroraTextDim, fontSize = 11.sp)
@@ -203,10 +184,7 @@ private fun StatColumn(label: String, value: String, icon: androidx.compose.ui.g
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = AuroraTextMid, fontSize = 13.sp)
         Text(value, color = AuroraTextHigh, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
@@ -219,114 +197,146 @@ private fun formatBytes(b: Long): String = when {
     else -> "$b B"
 }
 
-/* --------------------------------------------------------- سرورها ------- */
+/* ----------------------------------------------------------------- SCAN -- */
 
 @Composable
-private fun EndpointsScreen(vm: MainViewModel) {
+private fun ScanScreen(vm: MainViewModel) {
+    val cfg by vm.config.collectAsState()
+    val scanState by vm.scanState.collectAsState()
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
+    ) {
+        Spacer(Modifier.height(8.dp))
+
+        AuroraCard {
+            SectionTitle("ENDPOINT SCANNER")
+            Text(
+                "Discover a working endpoint automatically. The core probes candidates and validates a real data path before returning one.",
+                color = AuroraTextDim, fontSize = 12.sp
+            )
+            Spacer(Modifier.height(14.dp))
+
+            EnumSelector("Scan mode", ScanMode.entries.map { Triple(it.id, it.label, it.hint) },
+                cfg.scanMode) { vm.updateConfig { c -> c.copy(scanMode = it) } }
+
+            Spacer(Modifier.height(8.dp))
+            EnumSelector("IP family", IpFamily.entries.map { Triple(it.id, it.label, "") },
+                cfg.ipFamily) { vm.updateConfig { c -> c.copy(ipFamily = it) } }
+
+            Spacer(Modifier.height(16.dp))
+            if (scanState == ScanState.RUNNING) {
+                OutlineGoldButton("Scanning…", onClick = {}, enabled = false)
+            } else {
+                GoldButton("Start scan", onClick = { vm.runScan() })
+            }
+        }
+
+        if (vm.scanLog.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            AuroraCard {
+                SectionTitle("LOG")
+                vm.scanLog.forEach { line ->
+                    Text("• $line", color = AuroraTextMid, fontSize = 12.sp,
+                        modifier = Modifier.padding(vertical = 2.dp))
+                }
+            }
+        }
+
+        if (vm.scanResults.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            AuroraCard {
+                SectionTitle("RESULTS")
+                vm.scanResults.forEach { r ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(r.address, color = AuroraGold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(Protocol.from(r.protocol).label, color = AuroraTextDim, fontSize = 11.sp)
+                        }
+                        if (r.reachable == true) {
+                            Icon(Icons.Filled.CheckCircle, null, tint = AuroraGreen, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Divider(color = AuroraDivider, thickness = 0.5.dp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("The found endpoint is saved and selected automatically. Go to Home to connect.",
+                    color = AuroraTextDim, fontSize = 11.sp)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/* -------------------------------------------------------------- SERVERS -- */
+
+@Composable
+private fun ServersScreen(vm: MainViewModel) {
     val cfg by vm.config.collectAsState()
     val endpoints by vm.endpoints.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
     ) {
         Spacer(Modifier.height(8.dp))
 
-        // انتخاب حالت: اسکن خودکار یا endpoint شخصی
         AuroraCard {
-            SectionTitle("روش انتخاب سرور")
-
-            ModeOption(
-                title = "اسکن خودکار",
-                subtitle = "هسته خودش بهترین endpoint را پیدا می‌کند",
-                selected = !cfg.useManualEndpoint,
-                onClick = { vm.updateConfig { it.copy(useManualEndpoint = false) } }
-            )
+            SectionTitle("SERVER SOURCE")
+            ModeOption("Auto scan", "Let the core find the best endpoint",
+                !cfg.useManualEndpoint) { vm.updateConfig { it.copy(useManualEndpoint = false) } }
             Spacer(Modifier.height(8.dp))
-            ModeOption(
-                title = "سرور شخصی",
-                subtitle = "IP و پورت دلخواه خودت را وارد کن",
-                selected = cfg.useManualEndpoint,
-                onClick = { vm.updateConfig { it.copy(useManualEndpoint = true) } }
-            )
+            ModeOption("Manual server", "Enter your own IP:PORT",
+                cfg.useManualEndpoint) { vm.updateConfig { it.copy(useManualEndpoint = true) } }
         }
 
         Spacer(Modifier.height(14.dp))
 
-        if (!cfg.useManualEndpoint) {
-            AuroraCard {
-                SectionTitle("تنظیمات اسکن")
-                EnumSelector(
-                    label = "حالت اسکن",
-                    options = ScanMode.entries.map { it.id to it.label },
-                    selected = cfg.scanMode,
-                    onSelect = { vm.updateConfig { c -> c.copy(scanMode = it) } }
-                )
-                Text(
-                    "حالت «سریع» زودتر جواب می‌دهد، «دقیق» شانس پیدا کردن سرور سالم را بالا می‌برد.",
-                    color = AuroraTextDim,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-        } else {
-            AuroraCard {
-                SectionTitle("سرور فعلی")
-                Text(
-                    cfg.manualEndpoint.ifBlank { "— انتخاب نشده —" },
-                    color = if (cfg.manualEndpoint.isBlank()) AuroraTextDim else AuroraGold,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(14.dp))
-                GoldButton("افزودن سرور جدید", onClick = { showAdd = true })
-            }
+        AuroraCard {
+            SectionTitle("CURRENT SERVER")
+            Text(
+                if (cfg.useManualEndpoint) cfg.manualEndpoint.ifBlank { "— none selected —" }
+                else "Auto scan",
+                color = if (cfg.useManualEndpoint && cfg.manualEndpoint.isBlank()) AuroraTextDim else AuroraGold,
+                fontSize = 16.sp, fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(14.dp))
+            GoldButton("Add server", onClick = { showAdd = true })
+        }
 
-            if (endpoints.isNotEmpty()) {
-                Spacer(Modifier.height(14.dp))
-                AuroraCard {
-                    SectionTitle("سرورهای ذخیره‌شده")
-                    endpoints.forEach { ep ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = cfg.manualEndpoint == ep.address,
-                                onClick = {
-                                    vm.updateConfig {
-                                        it.copy(manualEndpoint = ep.address, protocol = ep.protocol)
-                                    }
-                                },
-                                colors = RadioButtonDefaults.colors(
-                                    selectedColor = AuroraGold,
-                                    unselectedColor = AuroraTextDim
-                                )
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(ep.name, color = AuroraTextHigh, fontSize = 14.sp)
-                                Text(
-                                    "${ep.address} • ${Protocol.from(ep.protocol).label}",
-                                    color = AuroraTextDim,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            IconButton(onClick = { vm.removeEndpoint(ep) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "حذف", tint = AuroraRed)
-                            }
+        if (endpoints.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            AuroraCard {
+                SectionTitle("SAVED SERVERS")
+                endpoints.forEach { ep ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = cfg.manualEndpoint == ep.address && cfg.useManualEndpoint,
+                            onClick = { vm.updateConfig { it.copy(manualEndpoint = ep.address, protocol = ep.protocol, useManualEndpoint = true) } },
+                            colors = RadioButtonDefaults.colors(selectedColor = AuroraGold, unselectedColor = AuroraTextDim)
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(ep.name, color = AuroraTextHigh, fontSize = 14.sp)
+                            Text("${ep.address} • ${Protocol.from(ep.protocol).label}", color = AuroraTextDim, fontSize = 11.sp)
                         }
-                        Divider(color = AuroraDivider, thickness = 0.5.dp)
+                        IconButton(onClick = { vm.removeEndpoint(ep) }) {
+                            Icon(Icons.Filled.Delete, "delete", tint = AuroraRed)
+                        }
                     }
+                    Divider(color = AuroraDivider, thickness = 0.5.dp)
                 }
             }
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
     }
 
     if (showAdd) {
@@ -348,24 +358,11 @@ private fun ModeOption(title: String, subtitle: String, selected: Boolean, onCli
         color = if (selected) AuroraGold.copy(alpha = 0.12f) else AuroraSurface2,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(Modifier)
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            RadioButton(
-                selected = selected,
-                onClick = onClick,
-                colors = RadioButtonDefaults.colors(
-                    selectedColor = AuroraGold,
-                    unselectedColor = AuroraTextDim
-                )
-            )
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selected, onClick = onClick,
+                colors = RadioButtonDefaults.colors(selectedColor = AuroraGold, unselectedColor = AuroraTextDim))
             Column {
-                Text(title, color = if (selected) AuroraGold else AuroraTextHigh,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(title, color = if (selected) AuroraGold else AuroraTextHigh, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text(subtitle, color = AuroraTextDim, fontSize = 11.sp)
             }
         }
@@ -373,10 +370,7 @@ private fun ModeOption(title: String, subtitle: String, selected: Boolean, onCli
 }
 
 @Composable
-private fun AddEndpointDialog(
-    onDismiss: () -> Unit,
-    onSave: (String, String, String) -> Unit
-) {
+private fun AddEndpointDialog(onDismiss: () -> Unit, onSave: (String, String, String) -> Unit) {
     var name by remember { mutableStateOf("") }
     var addr by remember { mutableStateOf("") }
     var proto by remember { mutableStateOf(Protocol.MASQUE.id) }
@@ -387,51 +381,32 @@ private fun AddEndpointDialog(
         containerColor = AuroraSurface,
         titleContentColor = AuroraGold,
         textContentColor = AuroraTextHigh,
-        title = { Text("افزودن سرور شخصی", fontWeight = FontWeight.Bold) },
+        title = { Text("Add manual server", fontWeight = FontWeight.Bold) },
         text = {
             Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("نام (دلخواه)") },
-                    singleLine = true,
-                    colors = auroraFieldColors(),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(name, { name = it }, label = { Text("Name (optional)") },
+                    singleLine = true, colors = auroraFieldColors(), modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = addr,
-                    onValueChange = { addr = it.trim() },
-                    label = { Text("IP:PORT") },
-                    placeholder = { Text("مثلا 162.159.192.1:2408") },
-                    singleLine = true,
-                    isError = addr.isNotBlank() && !valid,
-                    colors = auroraFieldColors(),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                OutlinedTextField(addr, { addr = it.trim() }, label = { Text("IP:PORT") },
+                    placeholder = { Text("e.g. 162.159.192.1:2408") }, singleLine = true,
+                    isError = addr.isNotBlank() && !valid, colors = auroraFieldColors(), modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
-                Text("پروتکل", color = AuroraTextMid, fontSize = 12.sp)
+                Text("Protocol", color = AuroraTextMid, fontSize = 12.sp)
                 Protocol.entries.forEach { p ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(
-                            selected = proto == p.id,
-                            onClick = { proto = p.id },
-                            colors = RadioButtonDefaults.colors(selectedColor = AuroraGold)
-                        )
+                        RadioButton(selected = proto == p.id, onClick = { proto = p.id },
+                            colors = RadioButtonDefaults.colors(selectedColor = AuroraGold))
                         Text(p.label, color = AuroraTextHigh, fontSize = 13.sp)
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onSave(name.ifBlank { addr }, addr, proto) },
-                enabled = valid
-            ) { Text("ذخیره", color = if (valid) AuroraGold else AuroraTextDim) }
+            TextButton(onClick = { onSave(name.ifBlank { addr }, addr, proto) }, enabled = valid) {
+                Text("Save", color = if (valid) AuroraGold else AuroraTextDim)
+            }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("لغو", color = AuroraTextMid) }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = AuroraTextMid) } }
     )
 }
 
@@ -446,186 +421,138 @@ private fun auroraFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedTextColor = AuroraTextHigh
 )
 
-/* ------------------------------------------------------- تنظیمات -------- */
+/* ------------------------------------------------------------- SETTINGS -- */
 
 @Composable
 private fun SettingsScreen(vm: MainViewModel) {
     val cfg by vm.config.collectAsState()
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp)
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
     ) {
         Spacer(Modifier.height(8.dp))
 
         AuroraCard {
-            SectionTitle("پروتکل تانل")
-            EnumSelector(
-                label = "پروتکل",
-                options = Protocol.entries.map { it.id to it.label },
-                selected = cfg.protocol,
-                onSelect = { vm.updateConfig { c -> c.copy(protocol = it) } }
-            )
-            Text(
-                "MASQUE روی HTTP/3 معمولا در شبکه‌های فیلترشده بهتر جواب می‌دهد. " +
-                    "Gool دو لایه WireGuard تو در تو است (کندتر ولی مقاوم‌تر).",
-                color = AuroraTextDim, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            SectionTitle("PROTOCOL")
+            EnumSelector("Tunnel protocol", Protocol.entries.map { Triple(it.id, it.label, it.hint) },
+                cfg.protocol) { vm.updateConfig { c -> c.copy(protocol = it) } }
         }
 
         Spacer(Modifier.height(14.dp))
 
         AuroraCard {
-            SectionTitle("مبهم‌سازی ترافیک (noize)")
-            EnumSelector(
-                label = "پروفایل",
-                options = NoizeProfile.entries.map { it.id to it.label },
-                selected = cfg.noizeProfile,
-                onSelect = { vm.updateConfig { c -> c.copy(noizeProfile = it) } }
-            )
+            SectionTitle("OBFUSCATION (NOIZE)")
+            EnumSelector("Profile", NoizeProfile.entries.map { Triple(it.id, it.label, it.hint) },
+                cfg.noizeProfile) { vm.updateConfig { c -> c.copy(noizeProfile = it) } }
         }
 
         Spacer(Modifier.height(14.dp))
 
         AuroraCard {
-            SectionTitle("شبکه")
-            InfoRow("پورت SOCKS5 محلی", cfg.socksPort.toString())
-            InfoRow("حالت تانل", "TUN (کل دستگاه)")
-            Text(
-                "در حالت TUN همه‌ی ترافیک گوشی از تانل عبور می‌کند، نه فقط اپ‌هایی که پروکسی را قبول می‌کنند.",
-                color = AuroraTextDim, fontSize = 11.sp,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            SectionTitle("ADVANCED")
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(Modifier.weight(1f)) {
+                    Text("Encrypted ClientHello (ECH)", color = AuroraTextHigh, fontSize = 14.sp)
+                    Text("Hide the SNI when supported", color = AuroraTextDim, fontSize = 11.sp)
+                }
+                Switch(checked = cfg.enableEch, onCheckedChange = { vm.updateConfig { c -> c.copy(enableEch = it) } },
+                    colors = SwitchDefaults.colors(checkedThumbColor = AuroraBlack, checkedTrackColor = AuroraGold))
+            }
+            InfoRow("Local SOCKS5 port", cfg.socksPort.toString())
+            InfoRow("Tunnel mode", "TUN (whole device)")
+            Text("In TUN mode all device traffic goes through the tunnel, not just proxy-aware apps.",
+                color = AuroraTextDim, fontSize = 11.sp, modifier = Modifier.padding(top = 8.dp))
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
 private fun EnumSelector(
     label: String,
-    options: List<Pair<String, String>>,
+    options: List<Triple<String, String, String>>,
     selected: String,
     onSelect: (String) -> Unit
 ) {
     Column {
-        options.forEach { (id, text) ->
+        Text(label, color = AuroraTextMid, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+        options.forEach { (id, text, hint) ->
             Surface(
                 shape = RoundedCornerShape(12.dp),
-                color = if (selected == id) AuroraGold.copy(alpha = 0.12f) else androidx.compose.ui.graphics.Color.Transparent,
+                color = if (selected == id) AuroraGold.copy(alpha = 0.12f) else Color.Transparent,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(
-                        selected = selected == id,
-                        onClick = { onSelect(id) },
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = AuroraGold,
-                            unselectedColor = AuroraTextDim
-                        )
-                    )
-                    Text(
-                        text,
-                        color = if (selected == id) AuroraGold else AuroraTextHigh,
-                        fontSize = 14.sp
-                    )
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = selected == id, onClick = { onSelect(id) },
+                        colors = RadioButtonDefaults.colors(selectedColor = AuroraGold, unselectedColor = AuroraTextDim))
+                    Column {
+                        Text(text, color = if (selected == id) AuroraGold else AuroraTextHigh, fontSize = 14.sp)
+                        if (hint.isNotBlank()) Text(hint, color = AuroraTextDim, fontSize = 10.sp)
+                    }
                 }
             }
         }
     }
 }
 
-/* --------------------------------------------------------- درباره ------- */
+/* ---------------------------------------------------------------- ABOUT -- */
 
 @Composable
 private fun AboutScreen(vm: MainViewModel) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
 
-        // نشان طلایی
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = AuroraSurface,
-            modifier = Modifier.size(110.dp)
-        ) {
+        Surface(shape = RoundedCornerShape(28.dp), color = AuroraSurface, modifier = Modifier.size(110.dp)) {
             Box(contentAlignment = Alignment.Center) {
-                Text(
-                    "AR",
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                Text("AR", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold,
                     style = androidx.compose.ui.text.TextStyle(
-                        brush = Brush.verticalGradient(listOf(AuroraGoldBright, AuroraGoldDim))
-                    )
-                )
+                        brush = Brush.verticalGradient(listOf(AuroraGoldBright, AuroraGoldDim))))
             }
         }
 
         Spacer(Modifier.height(16.dp))
         Text("Aurora-R", color = AuroraTextHigh, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text("نسخه ۱.۰.۰", color = AuroraTextDim, fontSize = 12.sp)
+        Text("Version 1.0.0", color = AuroraTextDim, fontSize = 12.sp)
 
         Spacer(Modifier.height(24.dp))
 
-        // کارت سازنده — درخواست صریح کاربر
         AuroraCard {
-            SectionTitle("سازنده")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
+            SectionTitle("DEVELOPER")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween) {
                 Column {
                     Text("Rez", color = AuroraTextHigh, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("توسعه‌دهنده و طراح", color = AuroraTextDim, fontSize = 11.sp)
+                    Text("Developer & designer", color = AuroraTextDim, fontSize = 11.sp)
                 }
                 Surface(shape = RoundedCornerShape(50), color = AuroraGold) {
-                    Text(
-                        "@iprez",
-                        color = AuroraBlack,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                    Text("@iprez", color = AuroraBlack, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Text(
-                "تلگرام: @iprez",
-                color = AuroraGold,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Text("Telegram: @iprez", color = AuroraGold, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
 
         Spacer(Modifier.height(14.dp))
 
         AuroraCard {
-            SectionTitle("هسته")
-            InfoRow("موتور", "Aether v${vm.version}")
-            InfoRow("تانل TUN", "hev-socks5-tunnel")
-            InfoRow("پروتکل‌ها", "MASQUE / WireGuard / Gool")
-            InfoRow("لایسنس هسته", "AGPL-3.0")
+            SectionTitle("CORE")
+            InfoRow("Engine", "Aether v${vm.version}")
+            InfoRow("TUN tunnel", "hev-socks5-tunnel")
+            InfoRow("Protocols", "MASQUE / WireGuard / Gool")
+            InfoRow("Core license", "AGPL-3.0")
             Spacer(Modifier.height(8.dp))
-            Text(
-                "این اپ برای استفاده شخصی ساخته شده است. هسته‌ی رمزنگاری از پروژه‌ی " +
-                    "متن‌باز Aether (CluvexStudio) استفاده می‌کند.",
-                color = AuroraTextDim, fontSize = 11.sp
-            )
+            Text("Built for personal use. Crypto core from the open-source Aether project (CluvexStudio).",
+                color = AuroraTextDim, fontSize = 11.sp)
         }
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
     }
 }
