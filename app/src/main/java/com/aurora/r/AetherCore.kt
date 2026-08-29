@@ -21,13 +21,16 @@ object AetherCore {
 
     init {
         loadError = try {
-            // ترتیب مهم است: کتابخانه‌های وابسته قبل از پل بارگذاری شوند.
-            System.loadLibrary("aether")
-            System.loadLibrary("hev-socks5-tunnel")
+            // فقط پل خودمان را بارگذاری می‌کنیم. libaether و libhev-socks5-tunnel
+            // در DT_NEEDED آن هستند، پس لینکر خودش آن‌ها را با dlopen بالا می‌آورد.
+            //
+            // مهم: System.loadLibrary روی hev باعث فراخوانی JNI_OnLoad داخلی آن
+            // می‌شد که کلاس جاوای مخصوص خودش را می‌خواست و JNI_ERR می‌داد.
+            // بارگذاری غیرمستقیم از طریق DT_NEEDED هرگز JNI_OnLoad را صدا نمی‌زند.
             System.loadLibrary("aurora_jni")
             null
         } catch (e: Throwable) {
-            android.util.Log.e("AetherCore", "بارگذاری کتابخانه بومی شکست خورد", e)
+            android.util.Log.e("AetherCore", "native library load failed", e)
             e.message ?: e.toString()
         }
     }
