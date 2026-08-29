@@ -38,7 +38,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope, SharingStarted.Eagerly, emptyList()
     )
 
-    val version = AetherCore.version()
+    val version = if (AetherCore.available) AetherCore.version() else "—"
+    val nativeError: String? = AetherCore.loadError
 
     // وضعیت UI
     val state = MutableStateFlow(VpnState.DISCONNECTED)
@@ -96,6 +97,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** درخواست مجوز VPN و سپس شروع سرویس */
     fun connect(): Intent? {
+        if (!AetherCore.available) {
+            state.value = VpnState.ERROR
+            statusMsg.value = "کتابخانه بومی بارگذاری نشد: ${AetherCore.loadError}"
+            return null
+        }
         if (state.value == VpnState.CONNECTED || state.value == VpnState.CONNECTING) return null
         val prepare = VpnService.prepare(getApplication())
         if (prepare != null) {

@@ -218,9 +218,51 @@ jobs:
           echo "=== نتیجه ==="
           ls -lhR app/src/main/jniLibs/
 
+      - name: Set SONAME on native libs (critical)
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq patchelf
+
+          # cargo-ndk کتابخانه را بدون SONAME می‌سازد. اگر SONAME نباشد، لینکر
+          # هنگام ساخت پل JNI مسیر کامل فایل روی رانر را در DT_NEEDED می‌نویسد و
+          # اپ روی گوشی هنگام System.loadLibrary کرش می‌کند.
+          for abi in arm64-v8a armeabi-v7a; do
+            for lib in libaether.so libhev-socks5-tunnel.so; do
+              F="app/src/main/jniLibs/$abi/$lib"
+              patchelf --set-soname "$lib" "$F"
+              echo "  $abi/$lib → soname: $(patchelf --print-soname "$F")"
+            done
+          done
+
       - name: Build release APK
         run: |
           gradle :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify no absolute paths in DT_NEEDED (critical)
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          rm -rf /tmp/apkcheck && mkdir -p /tmp/apkcheck
+          unzip -q "$APK" "lib/*" -d /tmp/apkcheck
+          READELF="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          if [ ! -x "$READELF" ]; then READELF=$(command -v readelf); fi
+
+          FAIL=0
+          for so in $(find /tmp/apkcheck/lib -name "*.so"); do
+            NEEDS=$("$READELF" -d "$so" 2>/dev/null | grep -i "NEEDED" || true)
+            if echo "$NEEDS" | grep -q "/"; then
+              echo "❌ $so حاوی مسیر مطلق در DT_NEEDED است:"
+              echo "$NEEDS" | grep "/"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo "بیلد رد شد: DT_NEEDED باید فقط نام کوتاه داشته باشد."
+            exit 1
+          fi
+          echo "✅ همه کتابخانه‌ها فقط نام کوتاه دارند — اپ روی دستگاه لینک می‌شود."
 
       - name: Verify APK is signed
         run: |

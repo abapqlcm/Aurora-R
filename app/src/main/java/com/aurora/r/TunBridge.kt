@@ -7,11 +7,6 @@ package com.aurora.r
  */
 object TunBridge {
 
-    init {
-        // AetherCore کتابخانه‌ها را بارگذاری می‌کند؛ اینجا فقط اطمینان حاصل می‌شود.
-        AetherCore.version()
-    }
-
     private external fun nativeTunnelRun(config: String, tunFd: Int): Int
     private external fun nativeTunnelStop()
     private external fun nativeTunnelStats(): LongArray?

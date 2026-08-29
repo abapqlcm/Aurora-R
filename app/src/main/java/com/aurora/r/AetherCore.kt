@@ -13,11 +13,23 @@ import org.json.JSONObject
  */
 object AetherCore {
 
+    /** اگر بارگذاری کتابخانه‌های بومی شکست بخورد اپ کرش نمی‌کند؛ این پیام در UI نمایش داده می‌شود. */
+    @Volatile var loadError: String? = null
+        private set
+
+    val available: Boolean get() = loadError == null
+
     init {
-        // ترتیب مهم است: libaether قبل از پل بارگذاری شود.
-        System.loadLibrary("aether")
-        System.loadLibrary("hev-socks5-tunnel")
-        System.loadLibrary("aurora_jni")
+        loadError = try {
+            // ترتیب مهم است: کتابخانه‌های وابسته قبل از پل بارگذاری شوند.
+            System.loadLibrary("aether")
+            System.loadLibrary("hev-socks5-tunnel")
+            System.loadLibrary("aurora_jni")
+            null
+        } catch (e: Throwable) {
+            android.util.Log.e("AetherCore", "بارگذاری کتابخانه بومی شکست خورد", e)
+            e.message ?: e.toString()
+        }
     }
 
     // --- توابع بومی ---------------------------------------------------
