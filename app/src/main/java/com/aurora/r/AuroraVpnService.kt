@@ -43,6 +43,7 @@ class AuroraVpnService : VpnService() {
     private var tunFd: ParcelFileDescriptor? = null
     private var statsJob: Job? = null
     private var config: ConnectionConfig = ConnectionConfig()
+    private var tunnelJobId: Long = 0L
 
     companion object {
         const val ACTION_START = "com.aurora.r.action.START"
@@ -104,7 +105,19 @@ class AuroraVpnService : VpnService() {
                     fail("باز کردن هویت شکست خورد: ${openReply.optString("error")}")
                     return@launch
                 }
-                val identityId = openReply.optJSONObject("result")?.optLong("identity") ?: 0L
+                // پاسخ: {"ok":true,"job":<id>} — job را مستقیماً از سطح بالا می‌خوانیم
+                val openJob = openReply.optLong("job", 0L)
+                if (openJob == 0L) {
+                    fail("پاسخ باز کردن هویت job نداشت")
+                    return@launch
+                }
+                val openResult = AetherCore.awaitJob(openJob)
+                // نتیجه: {"identity":<id>,"summary":{...},"path":"...","lastconn_path":"..."}
+                val identityId = openResult.optLong("identity", 0L)
+                if (identityId == 0L) {
+                    fail("هویت ساخته نشد")
+                    return@launch
+                }
 
                 // 3) تعیین endpoint: اسکن یا دستی
                 val endpoint = if (config.useManualEndpoint && config.manualEndpoint.isNotBlank()) {
@@ -121,8 +134,14 @@ class AuroraVpnService : VpnService() {
                         fail("اسکن شکست خورد: ${scanReply.optString("error")}")
                         return@launch
                     }
-                    val scanJob = scanReply.optJSONObject("result")?.optLong("job") ?: 0L
+                    // پاسخ: {"ok":true,"job":<id>}
+                    val scanJob = scanReply.optLong("job", 0L)
+                    if (scanJob == 0L) {
+                        fail("پاسخ اسکن job نداشت")
+                        return@launch
+                    }
                     val scanResult = AetherCore.awaitJob(scanJob)
+                    // نتیجه: {"endpoint":"IP:PORT"}
                     val ep = scanResult.optString("endpoint").takeIf { it.isNotBlank() }
                     if (ep == null) {
                         fail("هیچ endpoint سالمی پیدا نشد")
@@ -145,10 +164,12 @@ class AuroraVpnService : VpnService() {
                     fail("تانل شکست خورد: ${tunnelReply.optString("error")}")
                     return@launch
                 }
-                AetherCore.jobPoll(tunnelReply.optJSONObject("result")?.optLong("job") ?: 0L)
+                // job را برای لغو در زمان قطع نگه می‌داریم
+                tunnelJobId = tunnelReply.optLong("job", 0L)
 
                 // 5) ساخت اینترفیس TUN (بدون خودِ اپ برای جلوگیری از loop)
                 val fd = establishTun() ?: run {
+                    AetherCore.jobCancel(tunnelJobId)
                     fail("ساخت اینترفیس TUN شکست خورد")
                     return@launch
                 }
@@ -225,13 +246,29 @@ class AuroraVpnService : VpnService() {
 
     private fun stopVpn(reason: String) {
         statsJob?.cancel()
+
+        // ۱) tun2socks را متوقف کن
         TunBridge.stop()
         tunnelThread?.let {
-            try { it.join(1500) } catch (_: Exception) {}
+            try { it.join(2000) } catch (_: Exception) {}
         }
         tunnelThread = null
+
+        // ۲) تانل Aether را لغو و آزاد کن (وگرنه در پس‌زمینه زنده می‌ماند)
+        if (tunnelJobId != 0L) {
+            try {
+                AetherCore.jobCancel(tunnelJobId)
+                AetherCore.jobFree(tunnelJobId)
+            } catch (e: Exception) {
+                android.util.Log.w("AuroraVpn", "cancel tunnel job failed: ${e.message}")
+            }
+            tunnelJobId = 0L
+        }
+
+        // ۳) اینترفیس TUN را ببند
         try { tunFd?.close() } catch (_: Exception) {}
         tunFd = null
+
         AetherCore.unsetEnv("AETHER_SOCKS")
         AetherCore.unsetEnv("AETHER_NOIZE")
         broadcast(VpnState.DISCONNECTED, reason)
@@ -239,10 +276,16 @@ class AuroraVpnService : VpnService() {
         stopSelf()
     }
 
+    /** جلوگیری از حلقه‌ی بی‌نهایت fail → stopVpn → fail */
+    @Volatile private var failing = false
+
     private fun fail(msg: String) {
+        if (failing) return
+        failing = true
         android.util.Log.e("AuroraVpn", msg)
         broadcast(VpnState.ERROR, msg)
         stopVpn(msg)
+        failing = false
     }
 
     private fun broadcast(state: VpnState, msg: String) {

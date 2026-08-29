@@ -46,10 +46,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val txBytes = MutableStateFlow(0L)
     val rxBytes = MutableStateFlow(0L)
 
-    val connectionState: StateFlow<VpnState> = combine(
-        state, config
-    ) { s, _ -> s }.stateIn(viewModelScope, SharingStarted.Eagerly, VpnState.DISCONNECTED)
-
     init {
         registerReceiver()
     }
