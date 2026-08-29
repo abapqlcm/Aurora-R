@@ -2,11 +2,10 @@ package com.aurora.r
 
 import kotlinx.serialization.Serializable
 
-/** Tunnel protocols supported by the Aether core */
+/** Tunnel protocols supported by the Aether 1.8.0 core (only these two exist). */
 enum class Protocol(val id: String, val label: String, val hint: String) {
-    MASQUE("masque", "MASQUE", "HTTP/3 based — usually best on filtered networks"),
-    WIREGUARD("wg", "WireGuard", "Classic WARP tunnel — fast and light"),
-    GOOL("gool", "Gool", "WireGuard in WireGuard — slower but more resistant");
+    MASQUE("masque", "MASQUE", "HTTP/3 (QUIC) — usually best on filtered networks"),
+    WIREGUARD("wg", "WireGuard", "WARP tunnel — fast and light");
 
     companion object {
         fun from(id: String?): Protocol = entries.firstOrNull { it.id == id } ?: MASQUE
@@ -24,18 +23,19 @@ enum class ScanMode(val id: String, val label: String, val hint: String) {
     }
 }
 
-/** Traffic obfuscation profile (noize) */
+/** Traffic obfuscation profile (noize). Valid values per Aether 1.8.0 noize::from_profile. */
 enum class NoizeProfile(val id: String, val label: String, val hint: String) {
-    FIREWALL("firewall", "Firewall", "Tuned for aggressive DPI / firewalls"),
-    BALANCED("balanced", "Balanced", "Moderate obfuscation, lower overhead"),
-    AGGRESSIVE("aggressive", "Aggressive", "Maximum obfuscation, more overhead");
+    FIREWALL("firewall", "Firewall", "Default — tuned for aggressive DPI"),
+    LIGHT("light", "Light", "Less padding, lower overhead"),
+    AGGRESSIVE("aggressive", "Aggressive", "Maximum obfuscation, more overhead"),
+    OFF("off", "Off", "No obfuscation — fastest, most detectable");
 
     companion object {
         fun from(id: String?): NoizeProfile = entries.firstOrNull { it.id == id } ?: FIREWALL
     }
 }
 
-/** IP family used while scanning */
+/** IP family used while scanning. Values per Aether IpScan::parse. */
 enum class IpFamily(val id: String, val label: String) {
     V4("v4", "IPv4"),
     V6("v6", "IPv6"),
