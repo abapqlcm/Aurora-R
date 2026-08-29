@@ -2,6 +2,9 @@ package com.aurora.r.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -24,6 +27,7 @@ enum class Screen(val title: String, val icon: androidx.compose.ui.graphics.vect
     SCAN("Scan", Icons.Filled.Radar),
     SERVERS("Servers", Icons.Filled.Dns),
     SETTINGS("Settings", Icons.Filled.Settings),
+    LOGS("Logs", Icons.Filled.Article),
     ABOUT("About", Icons.Filled.Info)
 }
 
@@ -63,10 +67,11 @@ fun AuroraApp(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit
                 .background(AuroraBlack)
         ) {
             when (screen) {
-                Screen.HOME -> HomeScreen(vm, onConnect, onDisconnect)
+                Screen.HOME -> HomeScreen(vm, onConnect, onDisconnect, navTo = { screen = it })
                 Screen.SCAN -> ScanScreen(vm)
                 Screen.SERVERS -> ServersScreen(vm)
                 Screen.SETTINGS -> SettingsScreen(vm)
+                Screen.LOGS -> LogsScreen()
                 Screen.ABOUT -> AboutScreen(vm)
             }
         }
@@ -109,12 +114,18 @@ private fun AuroraTopBar() {
 /* ----------------------------------------------------------------- HOME -- */
 
 @Composable
-private fun HomeScreen(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: () -> Unit) {
+private fun HomeScreen(
+    vm: MainViewModel,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    navTo: (Screen) -> Unit
+) {
     val state by vm.state.collectAsState()
     val msg by vm.statusMsg.collectAsState()
     val tx by vm.txBytes.collectAsState()
     val rx by vm.rxBytes.collectAsState()
     val cfg by vm.config.collectAsState()
+    val endpointNow by vm.currentEndpoint.collectAsState()
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
@@ -166,6 +177,19 @@ private fun HomeScreen(vm: MainViewModel, onConnect: () -> Unit, onDisconnect: (
             InfoRow("Obfuscation", NoizeProfile.from(cfg.noizeProfile).label)
             InfoRow("Mode", "TUN — whole device")
             InfoRow("Aether core", "v${vm.version}")
+            if (endpointNow.isNotBlank()) InfoRow("Connected to", endpointNow)
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        AuroraCard {
+            SectionTitle("QUICK ACTIONS")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlineGoldButton("Scan endpoint", onClick = { navTo(Screen.SCAN) },
+                    modifier = Modifier.weight(1f))
+                OutlineGoldButton("View logs", onClick = { navTo(Screen.LOGS) },
+                    modifier = Modifier.weight(1f))
+            }
         }
 
         Spacer(Modifier.height(24.dp))
@@ -237,7 +261,8 @@ private fun ScanScreen(vm: MainViewModel) {
             AuroraCard {
                 SectionTitle("LOG")
                 vm.scanLog.forEach { line ->
-                    Text("• $line", color = AuroraTextMid, fontSize = 12.sp,
+                    val isErr = line.startsWith("Error") || line.contains("failed") || line.contains("not created") || line.contains("No healthy")
+                    Text("• $line", color = if (isErr) AuroraRed else AuroraTextMid, fontSize = 12.sp,
                         modifier = Modifier.padding(vertical = 2.dp))
                 }
             }
@@ -493,6 +518,67 @@ private fun EnumSelector(
                         Text(text, color = if (selected == id) AuroraGold else AuroraTextHigh, fontSize = 14.sp)
                         if (hint.isNotBlank()) Text(hint, color = AuroraTextDim, fontSize = 10.sp)
                     }
+                }
+            }
+        }
+    }
+}
+
+/* ----------------------------------------------------------------- LOGS -- */
+
+@Composable
+private fun LogsScreen() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)
+    ) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            SectionTitle("DIAGNOSTIC LOG")
+            Row {
+                TextButton(onClick = {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Aurora-R log", AppLog.dump()))
+                }) { Text("Copy", color = AuroraGold, fontSize = 13.sp) }
+                TextButton(onClick = { AppLog.clear() }) {
+                    Text("Clear", color = AuroraTextMid, fontSize = 13.sp)
+                }
+            }
+        }
+
+        if (AppLog.lines.isEmpty()) {
+            Box(Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.Center) {
+                Text("No log entries yet.\nConnect or scan to generate diagnostics.",
+                    color = AuroraTextDim, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+        } else {
+            val listState = rememberLazyListState()
+            LaunchedEffect(AppLog.lines.size) {
+                if (AppLog.lines.isNotEmpty()) listState.animateScrollToItem(AppLog.lines.size - 1)
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 8.dp)
+                    .background(AuroraSurface2, RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+            ) {
+                items(AppLog.lines.size) { i ->
+                    val line = AppLog.lines[i]
+                    val c = when {
+                        line.contains(" E/") -> AuroraRed
+                        line.contains(" W/") -> AuroraGoldBright
+                        else -> AuroraTextMid
+                    }
+                    Text(line, color = c, fontSize = 10.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(vertical = 1.dp))
                 }
             }
         }

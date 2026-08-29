@@ -12,6 +12,7 @@ import com.aurora.r.AuroraVpnService.Companion.ACTION_START
 import com.aurora.r.AuroraVpnService.Companion.ACTION_STATE
 import com.aurora.r.AuroraVpnService.Companion.ACTION_STOP
 import com.aurora.r.AuroraVpnService.Companion.EXTRA_CONFIG
+import com.aurora.r.AuroraVpnService.Companion.EXTRA_ENDPOINT
 import com.aurora.r.AuroraVpnService.Companion.EXTRA_MSG
 import com.aurora.r.AuroraVpnService.Companion.EXTRA_RX
 import com.aurora.r.AuroraVpnService.Companion.EXTRA_STATE
@@ -43,6 +44,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // UI state
     val state = MutableStateFlow(VpnState.DISCONNECTED)
     val statusMsg = MutableStateFlow("Ready")
+    val currentEndpoint = MutableStateFlow("")
     val txBytes = MutableStateFlow(0L)
     val rxBytes = MutableStateFlow(0L)
 
@@ -53,15 +55,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         registerReceiver()
+        if (AetherCore.available) AppLog.i("UI", "native core loaded, version=${AetherCore.version()}")
+        else AppLog.e("UI", "native core NOT available: ${AetherCore.loadError}")
     }
 
     private fun registerReceiver() {
         receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context?, intent: Intent?) {
                 if (intent?.action == ACTION_STATE) {
-                    val s = VpnState.valueOf(intent.getStringExtra(EXTRA_STATE) ?: "DISCONNECTED")
+                    val s = runCatching { VpnState.valueOf(intent.getStringExtra(EXTRA_STATE) ?: "DISCONNECTED") }
+                        .getOrDefault(VpnState.DISCONNECTED)
                     state.value = s
                     statusMsg.value = intent.getStringExtra(EXTRA_MSG) ?: ""
+                    currentEndpoint.value = intent.getStringExtra(EXTRA_ENDPOINT) ?: ""
                     txBytes.value = intent.getLongExtra(EXTRA_TX, 0L)
                     rxBytes.value = intent.getLongExtra(EXTRA_RX, 0L)
                 }
@@ -78,8 +84,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateConfig(block: (ConnectionConfig) -> ConnectionConfig) {
         viewModelScope.launch {
-            val next = block(config.value)
-            repo.saveConfig(next)
+            repo.saveConfig(block(config.value))
         }
     }
 
@@ -106,6 +111,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 scanLog.clear()
                 scanResults.clear()
                 scanLog.add("Provisioning identity…")
+                AppLog.i("Scan", "start mode=${config.value.scanMode} ip=${config.value.ipFamily}")
 
                 val cfgDir = getApplication<Application>().filesDir
                 val idPath = java.io.File(cfgDir, "aether/aether.toml").absolutePath
@@ -114,8 +120,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     put("transport", config.value.protocol)
                 })
                 if (!open.optBoolean("ok", false)) {
-                    scanLog.add("identity open failed: ${open.optString("error")}")
-                    scanState.value = ScanState.ERROR
+                    val m = "identity open failed: ${open.optString("error")}"
+                    scanLog.add(m); AppLog.e("Scan", m); scanState.value = ScanState.ERROR
                     return@launch
                 }
                 val openJob = open.optLong("job", 0L)
@@ -130,10 +136,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     put("mode", config.value.scanMode)
                     put("ip", config.value.ipFamily)
                     put("profile", config.value.noizeProfile)
+                    put("ech", config.value.enableEch)
                 })
                 if (!scan.optBoolean("ok", false)) {
-                    scanLog.add("scan failed: ${scan.optString("error")}")
-                    scanState.value = ScanState.ERROR
+                    val m = "scan failed: ${scan.optString("error")}"
+                    scanLog.add(m); AppLog.e("Scan", m); scanState.value = ScanState.ERROR
                     return@launch
                 }
                 val scanJob = scan.optLong("job", 0L)
@@ -141,20 +148,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val result = AetherCore.awaitJob(scanJob)
                 val endpoint = result.optString("endpoint").takeIf { it.isNotBlank() }
                 if (endpoint != null) {
-                    scanLog.add("Found endpoint: $endpoint")
+                    val m = "Found endpoint: $endpoint"
+                    scanLog.add(m); AppLog.i("Scan", m)
                     scanResults.add(ScanResult(endpoint, config.value.protocol, reachable = true))
-                    // save as a manual endpoint automatically
                     val name = "scan-${scanResults.size}"
                     addEndpoint(SavedEndpoint(name, endpoint, config.value.protocol))
                     updateConfig { it.copy(useManualEndpoint = true, manualEndpoint = endpoint) }
                     scanState.value = ScanState.DONE
                 } else {
-                    scanLog.add("No healthy endpoint found")
-                    scanState.value = ScanState.DONE
+                    val m = "No healthy endpoint found (try Thorough mode / different protocol)"
+                    scanLog.add(m); AppLog.w("Scan", m); scanState.value = ScanState.DONE
                 }
+                runCatching { AetherCore.identityFree(identityId) }
             } catch (e: Throwable) {
-                scanLog.add("error: ${e.message}")
-                scanState.value = ScanState.ERROR
+                val m = "Error: ${e.message ?: e.javaClass.simpleName}"
+                scanLog.add(m); AppLog.e("Scan", m, e); scanState.value = ScanState.ERROR
             }
         }
     }
@@ -170,11 +178,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!AetherCore.available) {
             state.value = VpnState.ERROR
             statusMsg.value = nativeError ?: "native library failed to load"
+            AppLog.e("UI", "connect blocked: native lib missing")
             return null
         }
         if (state.value == VpnState.CONNECTED || state.value == VpnState.CONNECTING) return null
         val prepare = VpnService.prepare(getApplication())
-        if (prepare != null) return prepare
+        if (prepare != null) {
+            AppLog.i("UI", "VPN permission prompt needed")
+            return prepare
+        }
+        AppLog.i("UI", "VPN permission already granted, starting service")
         startService()
         return null
     }
@@ -193,12 +206,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun disconnect() {
+        AppLog.i("UI", "disconnect requested")
         val intent = Intent(getApplication(), AuroraVpnService::class.java).apply { action = ACTION_STOP }
         getApplication<Application>().startService(intent)
     }
 
     override fun onCleared() {
         super.onCleared()
-        receiver?.let { getApplication<Application>().unregisterReceiver(it) }
+        receiver?.let { runCatching { getApplication<Application>().unregisterReceiver(it) } }
     }
 }

@@ -6,7 +6,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPLARY" />
+    <!--
+      مهم: قبلاً اینجا FOREGROUND_SERVICE_SYSTEM_EXEMPLARY نوشته شده بود که
+      اصلاً وجود ندارد، و سرویس با type=systemExempted بالا می‌آمد. روی اندروید ۱۴+
+      این باعث SecurityException و کرش لحظه‌ی زدن دکمه Connect می‌شد.
+      نوع درست برای اپ VPN همان specialUse است.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -34,7 +40,10 @@
             android:name=".AuroraVpnService"
             android:exported="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="systemExempted">
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn" />
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
